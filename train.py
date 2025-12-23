@@ -17,13 +17,12 @@ def main():
     with mlflow.start_run():
 
         # 2. Download dataset
-        # url = "https://archive.ics.uci.edu/ml/machine-learning-databases/heart-disease/processed.cleveland.data"
         url = (
                 "https://archive.ics.uci.edu/ml/"
                 "machine-learning-databases/"
                 "heart-disease/processed.cleveland.data"
-                )
-        
+        )
+
         columns = [
             "age", "sex", "cp", "trestbps", "chol",
             "fbs", "restecg", "thalach", "exang",
