@@ -11,7 +11,7 @@ from sklearn.metrics import accuracy_score
 
 def main():
     # 1. Configure MLflow (local, free)
-    mlflow.set_tracking_uri("file:/content/mlruns")
+    mlflow.set_tracking_uri("file:./mlruns")
     mlflow.set_experiment("heart-disease-poc")
 
     with mlflow.start_run():
