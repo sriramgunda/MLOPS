@@ -24,22 +24,22 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 1️⃣ Linting
+    # Linting
     - name: Lint code with flake8
       run: |
         flake8 train.py tests/
-    
-    # 2️⃣ Unit Testing
-    - name: Run unit tests
-      run: |
-        pytest -v
 
-    # 3️⃣ Model Training
+    # Model Training
     - name: Train model
       run: |
         python train.py
 
-    # 4️⃣ Upload trained model artifact
+    # Unit Testing
+    - name: Run unit tests
+      run: |
+        pytest -v
+
+    # Upload trained model artifact
     - name: Upload model artifact
       uses: actions/upload-artifact@v4
       with:
