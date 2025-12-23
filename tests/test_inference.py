@@ -8,6 +8,7 @@ MODEL_PATH = os.path.join(
     "heart_model.pkl"
 )
 
+
 def test_model_load_and_predict():
     # Load model
     with open(MODEL_PATH, "rb") as f:
