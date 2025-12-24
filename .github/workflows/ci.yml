@@ -2,9 +2,9 @@ name: Heart Disease ML CI Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "sriram" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "sriram" ]
 
 jobs:
   build-test-train:
