@@ -8,3 +8,6 @@ ucimlrepo
 fastapi
 uvicorn
 prometheus-client
+flaml>=2.1.0
+ydata-profiling>=4.6.0
+ipykernel>=6.0.0
