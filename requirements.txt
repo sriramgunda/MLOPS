@@ -7,3 +7,4 @@ mlflow
 ucimlrepo
 fastapi
 uvicorn
+prometheus-client
