@@ -1,0 +1,63 @@
+version: "3.9"
+
+services:
+
+  # -------------------
+  # Training service
+  # -------------------
+  train:
+    image: heart-disease
+    build: .
+    command: >
+      bash -c "
+      python -m src.models.train &&
+      python -m src.models.select_best_model
+      "
+    volumes:
+      - ./mlruns:/app/mlruns
+      - ./mlflow:/app/mlflow
+    environment:
+      MLFLOW_TRACKING_URI: sqlite:////app/mlflow/mlflow.db
+    profiles: ["train"]
+
+  # -------------------
+  # API service
+  # -------------------
+  api:
+    image: heart-disease
+    command: >
+      bash -c "
+      uvicorn src.api.app:app
+      --host 0.0.0.0
+      --port 8000
+      --log-level info
+      --workers 1
+      "
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mlruns:/app/mlruns
+      - ./mlflow:/app/mlflow
+    environment:
+      MLFLOW_TRACKING_URI: sqlite:////app/mlflow/mlflow.db
+
+  # -------------------
+  # MLflow UI service
+  # -------------------
+  mlflow:
+    image: heart-disease
+    command: >
+      bash -c "
+      mlflow ui
+      --backend-store-uri sqlite:////app/mlflow/mlflow.db
+      --default-artifact-root /app/mlruns
+      --host 0.0.0.0
+      --port 5000
+      "
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns:/app/mlruns
+      - ./mlflow:/app/mlflow
+    environment:
+      MLFLOW_TRACKING_URI: sqlite:////app/mlflow/mlflow.db
