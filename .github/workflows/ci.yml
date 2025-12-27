@@ -1,44 +1,52 @@
-name: Heart Disease ML CI Pipeline
+name: CI Docker
 
-on:
-  push:
-    branches: [ "sriram" ]
-  pull_request:
-    branches: [ "sriram" ]
+on: [push]
 
 jobs:
-  build-test-train:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
+      # Step 1: Checkout code
+      - uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.10"
+      # Step 2: Set up Python (for pytest)
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
 
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pytest flake8
+      # Step 3: Install dependencies for tests
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt pytest requests      
 
-    - name: Lint Code (flake8)
-      run: |
-        flake8 heart_disease.py || true
+      # Step 4: Build Docker image
+      - name: Build Docker image
+        run: docker build -t heart-disease-app .
 
-    - name: Run Unit Tests
-      run: |
-        pytest tests/
+      # Step 5: Run container in detached mode
+      - name: Run container
+        run: |
+          docker run -d \
+            --name heart-disease-test \
+            -v ${{ github.workspace }}/mlruns:/app/mlruns \
+            -v ${{ github.workspace }}/mlflow.db:/app/mlflow.db \
+            -e MLFLOW_TRACKING_URI=sqlite:///mlflow.db \
+            heart-disease-app
 
-    - name: Train Model (Smoke Run)
-      run: |
-        python heart_disease.py
+      # Step 6: Wait for services to start
+      - name: Wait for startup
+        run: sleep 30  # adjust if needed
 
-    - name: Upload MLflow Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: mlflow-runs
-        path: mlruns/
+      # Step 7: Test API inside container
+      - name: Test API
+        run: docker exec heart-disease-test python /app/test_request.py
+
+      # Step 8: Run pytest
+      - name: Run unit tests
+        run: PYTHONPATH=$PWD pytest tests/ --maxfail=1 --disable-warnings -v  
+
+      # Step 9: Cleanup
+      - name: Cleanup
+        run: |
+          docker stop heart-disease-test
+          docker rm heart-disease-test
