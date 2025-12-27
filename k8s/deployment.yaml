@@ -1,9 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: heart-disease-deployment
+  name: heart-disease
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: heart-disease
@@ -12,9 +12,88 @@ spec:
       labels:
         app: heart-disease
     spec:
+
+      # -----------------------
+      # Init container: runs training once before main containers
+      # -----------------------
+      initContainers:
+        - name: train
+          image: heart-disease:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              python -m src.models.train &&
+              python -m src.models.select_best_model
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: sqlite:////app/mlflow/mlflow.db
+          volumeMounts:
+            - name: mlflow-storage
+              mountPath: /app/mlflow
+            - name: mlruns-storage
+              mountPath: /app/mlruns
+
+      # -----------------------
+      # Main containers: API + MLflow
+      # -----------------------
       containers:
-      - name: heart-disease-api
-        image: heart-disease-api:1.0
-        imagePullPolicy: Never
-        ports:
-        - containerPort: 8000
+        - name: api
+          image: heart-disease:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              uvicorn src.api.app:app \
+              --host 0.0.0.0 \
+              --port 8000 \
+              --log-level info \
+              --workers 1
+          ports:
+            - containerPort: 8000
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: sqlite:////app/mlflow/mlflow.db
+          volumeMounts:
+            - name: mlflow-storage
+              mountPath: /app/mlflow
+            - name: mlruns-storage
+              mountPath: /app/mlruns
+
+        - name: mlflow
+          image: heart-disease:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - bash
+            - -c
+            - |
+              mlflow ui \
+              --backend-store-uri sqlite:////app/mlflow/mlflow.db \
+              --default-artifact-root /app/mlruns \
+              --host 0.0.0.0 \
+              --port 5000
+          ports:
+            - containerPort: 5000
+          env:
+            - name: MLFLOW_TRACKING_URI
+              value: sqlite:////app/mlflow/mlflow.db
+          volumeMounts:
+            - name: mlflow-storage
+              mountPath: /app/mlflow
+            - name: mlruns-storage
+              mountPath: /app/mlruns
+
+      # -----------------------
+      # Shared volumes
+      # -----------------------
+      volumes:
+        - name: mlflow-storage
+          hostPath:
+            path: /data/mlflow
+            type: DirectoryOrCreate
+        - name: mlruns-storage
+          hostPath:
+            path: /data/mlruns
+            type: DirectoryOrCreate
