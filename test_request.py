@@ -6,7 +6,9 @@ import json
 # URL = "http://127.0.0.1:8000/predict"
 
 # Docker
-URL = "http://localhost:8000/predict"
+# URL = "http://localhost:8000/predict"
+
+URL = "http://api:8000/predict"
 
 # Example input features (replace with your actual feature names)
 payload = {
