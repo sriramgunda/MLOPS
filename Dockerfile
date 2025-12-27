@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
 COPY scripts/ scripts/
+COPY test_request.py .
 
 EXPOSE 8000
 EXPOSE 5000
