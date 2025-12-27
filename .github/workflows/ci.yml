@@ -1,4 +1,4 @@
-name: CI Docker
+name: CI Docker Compose
 
 on: [push]
 
@@ -8,45 +8,49 @@ jobs:
 
     steps:
       # Step 1: Checkout code
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
       # Step 2: Set up Python (for pytest)
-      - uses: actions/setup-python@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      # Step 3: Install dependencies for tests
+      # Step 3: Install Python dependencies for tests
       - name: Install Python dependencies
-        run: pip install -r requirements.txt pytest requests      
-
-      # Step 4: Build Docker image
-      - name: Build Docker image
-        run: docker build -t heart-disease-app .
-
-      # Step 5: Run container in detached mode
-      - name: Run container
         run: |
-          docker run -d \
-            --name heart-disease-test \
-            -v ${{ github.workspace }}/mlruns:/app/mlruns \
-            -v ${{ github.workspace }}/mlflow.db:/app/mlflow.db \
-            -e MLFLOW_TRACKING_URI=sqlite:///mlflow.db \
-            heart-disease-app
+          pip install --upgrade pip
+          pip install -r requirements.txt pytest requests
 
-      # Step 6: Wait for services to start
-      - name: Wait for startup
-        run: sleep 30  # adjust if needed
+      # Step 4: Build Docker images (from docker-compose.yml)
+      - name: Build Docker images
+        run: docker compose build
 
-      # Step 7: Test API inside container
-      - name: Test API
-        run: docker exec heart-disease-test python /app/test_request.py
+      # ------------------------------------------------
+      # OPTIONAL: Run training pipeline
+      # ------------------------------------------------
+      - name: Run training service
+        run: docker compose --profile train up --abort-on-container-exit train
 
-      # Step 8: Run pytest
-      - name: Run unit tests
-        run: PYTHONPATH=$PWD pytest tests/ --maxfail=1 --disable-warnings -v  
+      # Step 5: Start API and MLflow services
+      - name: Start API and MLflow services
+        run: docker compose up -d api mlflow
+
+      # Step 6: Wait for services to be ready
+      - name: Wait for services
+        run: sleep 30
+
+      # Step 7: Test API from container
+      - name: Test API endpoint
+        run: docker compose exec api python /app/test_request.py
+
+      # Step 8: Run unit tests
+      - name: Run pytest
+        run: |
+          PYTHONPATH=$PWD pytest tests/ --maxfail=1 --disable-warnings -v
 
       # Step 9: Cleanup
-      - name: Cleanup
-        run: |
-          docker stop heart-disease-test
-          docker rm heart-disease-test
+      - name: Cleanup containers
+        if: always()
+        run: docker compose down -v
