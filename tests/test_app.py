@@ -35,7 +35,7 @@ def test_predict_heart_disease_valid_input():
             client = TestClient(main.app)
 
             data = {
-                "age": 50.0,
+                "age": 51.0,
                 "sex": 1.0,
                 "cp": 2.0,
                 "trestbps": 130.0,
