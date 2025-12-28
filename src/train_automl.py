@@ -22,8 +22,8 @@ LEARNER_MAP = {
     'rf': 'Random Forest',
     'lrl1': 'Logistic Regression (L1)',
     'lrl2': 'Logistic Regression (L2)',
-    'catboost': 'CatBoost',
-    'extra_tree': 'Extra Trees',
+    #'catboost': 'CatBoost',
+    #'extra_tree': 'Extra Trees',
     'kneighbor': 'K-Nearest Neighbors'
 }
 

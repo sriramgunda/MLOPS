@@ -30,7 +30,7 @@ jobs:
 
     - name: Lint Code (flake8)
       run: |
-        flake8 heart_disease.py || true
+        flake8 src/train_automl.py || true
 
     - name: Run Unit Tests
       run: |
