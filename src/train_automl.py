@@ -15,8 +15,18 @@ import sys
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# Define a custom function for the oldpeak indicator at the top level
-# This is REQUIRED for the pipeline to be picklable/loadable by MLflow/Pickle
+# Standardized Mapping for Learners
+LEARNER_MAP = {
+    'lgbm': 'LightGBM',
+    'xgboost': 'XGBoost',
+    'rf': 'Random Forest',
+    'lrl1': 'Logistic Regression (L1)',
+    'lrl2': 'Logistic Regression (L2)',
+    'catboost': 'CatBoost',
+    'extra_tree': 'Extra Trees',
+    'kneighbor': 'K-Nearest Neighbors'
+}
+
 def add_oldpeak_indicator(X):
     """
     Assumes oldpeak is the last column in the numeric group or accessed by index.
@@ -156,28 +166,33 @@ def train_pipeline():
     # Convert back to dataframe for FLAML (optional but helpful for some estimators, though numpy is fine)
     # FLAML works fine with numpy arrays (CSR matrix from OHE).
 
-    # Define custom callback to log each trial to MLflow
-    # Note: Removed from fit() due to compatibility issues with recent FLAML versions.
     # Shared dictionary to pass metrics from custom_metric to the callback
-    # current_trial_metrics = {}
+    current_trial_metrics = {}
 
-    # def mlflow_logging_callback(trial_index, val_loss, config, best_val_loss, estimator, metric, time_total):
-    #     # Start a nested run for each trial
-    #     with mlflow.start_run(nested=True, run_name=f"Trial_{trial_index}_{estimator}"):
-    #         # Standardized Parameter Wording
-    #         mlflow.log_param("Model_Type", estimator)
-    #         for k, v in config.items():
-    #             mlflow.log_param(k, v)
-    #         
-    #         # Log primary optimization metric
-    #         mlflow.log_metric("val_loss", val_loss)
-    #         
-    #         # Log additional metrics from custom_metric if available
-    #         if current_trial_metrics:
-    #             for m_name, m_val in current_trial_metrics.items():
-    #                 mlflow.log_metric(m_name, m_val)
-    #             # Clear for next trial
-    #             current_trial_metrics.clear()
+    def mlflow_logging_callback(trial_index, val_loss, config, best_val_loss, estimator, metric, time_total):
+        """
+        Callback for FLAML to log each trial to MLflow as a nested run.
+        """
+        run_name = f"Trial_{trial_index}_{estimator}"
+        with mlflow.start_run(nested=True, run_name=run_name):
+            # Log Model Type (Standardized)
+            readable_name = LEARNER_MAP.get(estimator, estimator)
+            mlflow.log_param("model_type", readable_name)
+            mlflow.log_param("learner", estimator)
+            
+            # Log Hyperparameters
+            for k, v in config.items():
+                mlflow.log_param(k, v)
+            
+            # Log Optimization Metric
+            mlflow.log_metric("val_loss", val_loss)
+            
+            # Log all additional metrics captured by custom_metric
+            if current_trial_metrics:
+                for m_name, m_val in current_trial_metrics.items():
+                    mlflow.log_metric(m_name, m_val)
+                # Clear for next trial
+                current_trial_metrics.clear()
 
     # Define custom metric function to track additional metrics
     def custom_metric(X_val, y_val, estimator, labels, X_train, y_train, weight_val=None, weight_train=None, config=None, groups_val=None, deprecated_groups_train=None):
@@ -208,8 +223,8 @@ def train_pipeline():
             "prediction_latency": pred_time
         }
         
-        # Update shared dictionary so callback can access it (Disabled as callback is inactive)
-        # current_trial_metrics.update(metrics_dict)
+        # Update shared dictionary so callback can access it
+        current_trial_metrics.update(metrics_dict)
         
         return val_loss, metrics_dict
 
@@ -235,7 +250,8 @@ def train_pipeline():
             "log_file_name": 'flaml.log',
             "seed": 42,
             "eval_method": "cv", 
-            "n_splits": 5,      
+            "n_splits": 5,
+            "callbacks": [mlflow_logging_callback]   
         }
         
         # Log params
@@ -244,8 +260,9 @@ def train_pipeline():
         mlflow.log_param("time_budget", 60)
         mlflow.log_param("task", "classification")
         
-        # Create artifacts directory for metadata and models
-        os.makedirs("mlflow_artifacts", exist_ok=True)
+        # Create artifacts directory for all best model results
+        artifact_dir = "best_model_artifacts"
+        os.makedirs(artifact_dir, exist_ok=True)
 
         # Train
         automl.fit(X_train=X_train_processed, y_train=y_train, **settings)
@@ -288,17 +305,7 @@ def train_pipeline():
         mlflow.log_params({"best_estimator": automl.best_estimator})
         
         # Log readable model type for the best model
-        learner_map = {
-            'lgbm': 'LightGBM',
-            'xgboost': 'XGBoost',
-            'rf': 'Random Forest',
-            'lrl1': 'Logistic Regression (L1)',
-            'lrl2': 'Logistic Regression (L2)',
-            #'catboost': 'CatBoost',
-            #'extra_tree': 'Extra Trees',
-            'kneighbor': 'K-Nearest Neighbors'
-        }
-        readable_best_model = learner_map.get(automl.best_estimator, automl.best_estimator)
+        readable_best_model = LEARNER_MAP.get(automl.best_estimator, automl.best_estimator)
         mlflow.log_param("model_type", readable_best_model)
         for k, v in automl.best_config.items():
             mlflow.log_param(f"best_config_{k}", v)
@@ -348,7 +355,7 @@ The best configuration found for each model type explored:
 
 """
         for learner, stats in learner_stats.items():
-            readable_name = learner_map.get(learner, learner)
+            readable_name = LEARNER_MAP.get(learner, learner)
             tuning_report += f"### {readable_name} ({learner})\n"
             tuning_report += f"- **Best Validation Loss:** {stats['error']:.4f}\n"
             tuning_report += f"- **Best Configuration:**\n```json\n{json.dumps(stats['config'], indent=4)}\n```\n\n"
@@ -360,15 +367,17 @@ The best performing model selected for final training was:
 - **Best Validation Loss:** {automl.best_loss:.4f}
 """
 
-        with open("mlflow_artifacts/tuning_report.md", "w") as f:
+        report_path = os.path.join(artifact_dir, "tuning_report.md")
+        with open(report_path, "w") as f:
             f.write(tuning_report)
-        mlflow.log_artifact("mlflow_artifacts/tuning_report.md", artifact_path="reports_and_metadata")
-        print("Generated and logged mlflow_artifacts/tuning_report.md with per-model details.")
+        mlflow.log_artifact(report_path, artifact_path=artifact_dir)
+        print(f"Generated and logged {report_path}")
 
-        # Log full best_config as JSON artifact for completeness
-        with open("mlflow_artifacts/best_config.json", "w") as f:
+        # Log full best_config as JSON artifact
+        config_path = os.path.join(artifact_dir, "best_config.json")
+        with open(config_path, "w") as f:
             json.dump(automl.best_config, f, indent=4)
-        mlflow.log_artifact("mlflow_artifacts/best_config.json", artifact_path="reports_and_metadata")
+        mlflow.log_artifact(config_path, artifact_path=artifact_dir)
 
         # Log Model
         # Log Model as Pickle (Explicit Request)
@@ -378,10 +387,11 @@ The best performing model selected for final training was:
             # automl.model is the wrapper, automl.model.estimator is the underlying sklearn-compatible model
             if hasattr(automl, 'model') and hasattr(automl.model, 'estimator'):
                 best_model = automl.model.estimator
-                with open("mlflow_artifacts/best_model.pkl", "wb") as f:
+                pkl_path = os.path.join(artifact_dir, "best_model.pkl")
+                with open(pkl_path, "wb") as f:
                     pickle.dump(best_model, f)
-                mlflow.log_artifact("mlflow_artifacts/best_model.pkl", artifact_path="models")
-                print("Successfully logged mlflow_artifacts/best_model.pkl")
+                mlflow.log_artifact(pkl_path, artifact_path=artifact_dir)
+                print(f"Successfully logged {pkl_path}")
                 
                 # Log via sklearn flavor
                 mlflow.sklearn.log_model(best_model, "best_model_sklearn")
@@ -393,10 +403,10 @@ The best performing model selected for final training was:
         
         # Evaluate using classification report
         report = classification_report(y_test, y_pred, output_dict=True)
-        # Flatten and log report metrics if needed, or save as JSON artifact
-        with open("mlflow_artifacts/classification_report.json", "w") as f:
+        report_json_path = os.path.join(artifact_dir, "classification_report.json")
+        with open(report_json_path, "w") as f:
             json.dump(report, f, indent=4)
-        mlflow.log_artifact("mlflow_artifacts/classification_report.json", artifact_path="reports_and_metadata")
+        mlflow.log_artifact(report_json_path, artifact_path=artifact_dir)
         
         # Generate and log selection reasoning
         best_val_roc_auc = 1.0 - automl.best_loss
@@ -411,9 +421,10 @@ The best performing model selected for final training was:
         )
         
         print(reasoning)
-        with open("mlflow_artifacts/model_selection_reasoning.txt", "w") as f:
+        reasoning_path = os.path.join(artifact_dir, "model_selection_reasoning.txt")
+        with open(reasoning_path, "w") as f:
             f.write(reasoning)
-        mlflow.log_artifact("mlflow_artifacts/model_selection_reasoning.txt", artifact_path="reports_and_metadata")
+        mlflow.log_artifact(reasoning_path, artifact_path=artifact_dir)
         mlflow.set_tag("selection_reason", f"Lowest val_loss: {automl.best_loss:.4f} (Val AUC: {best_val_roc_auc:.4f})")
         mlflow.log_param("selection_reason", f"Lowest val_loss: {automl.best_loss:.4f} (Val AUC: {best_val_roc_auc:.4f})")
 
@@ -430,8 +441,9 @@ The best performing model selected for final training was:
         plt.ylabel('Actual Label')
         plt.xlabel('Predicted Label')
         plt.tight_layout()
-        plt.savefig("plots/confusion_matrix.png")
-        mlflow.log_artifact("plots/confusion_matrix.png", artifact_path="model_evaluation")
+        cm_path = os.path.join(artifact_dir, "confusion_matrix.png")
+        plt.savefig(cm_path)
+        mlflow.log_artifact(cm_path, artifact_path=artifact_dir)
         plt.close()
 
         # 2. ROC Curve
@@ -447,21 +459,23 @@ The best performing model selected for final training was:
         plt.title('Receiver Operating Characteristic (ROC)')
         plt.legend(loc="lower right")
         plt.tight_layout()
-        plt.savefig("plots/roc_curve.png")
-        mlflow.log_artifact("plots/roc_curve.png", artifact_path="model_evaluation")
+        roc_path = os.path.join(artifact_dir, "roc_curve.png")
+        plt.savefig(roc_path)
+        mlflow.log_artifact(roc_path, artifact_path=artifact_dir)
         plt.close()
         
-        print("Logged performance plots (plots/confusion_matrix.png, plots/roc_curve.png) to MLflow.")
+        print(f"Logged performance plots to {artifact_dir} in MLflow.")
 
         # ---------------------------------------------------------
         # Save Full Inference Pipeline (Preprocessor + Model)
         # ---------------------------------------------------------
         try:
             # 1. Save the fitted Preprocessor
-            with open("mlflow_artifacts/preprocessor.pkl", "wb") as f:
+            prep_path = os.path.join(artifact_dir, "preprocessor.pkl")
+            with open(prep_path, "wb") as f:
                 pickle.dump(preprocessor, f)
-            mlflow.log_artifact("mlflow_artifacts/preprocessor.pkl", artifact_path="models")
-            print("Successfully logged mlflow_artifacts/preprocessor.pkl")
+            mlflow.log_artifact(prep_path, artifact_path=artifact_dir)
+            print(f"Successfully logged {prep_path}")
 
             # 2. Create and Save Unified Inference Pipeline
             if hasattr(automl, 'model') and hasattr(automl.model, 'estimator'):
@@ -472,9 +486,10 @@ The best performing model selected for final training was:
                     ('model', automl.model.estimator)
                 ])
                 
-                with open("mlflow_artifacts/inference_pipeline.pkl", "wb") as f:
+                inf_path = os.path.join(artifact_dir, "inference_pipeline.pkl")
+                with open(inf_path, "wb") as f:
                     pickle.dump(inference_pipeline, f)
-                mlflow.log_artifact("mlflow_artifacts/inference_pipeline.pkl", artifact_path="models")
+                mlflow.log_artifact(inf_path, artifact_path=artifact_dir)
                 
                 # Also log as an MLflow Model (Pipeline flavor) and register it in the Model Registry
                 mlflow.sklearn.log_model(
