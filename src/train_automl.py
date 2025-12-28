@@ -244,28 +244,38 @@ def train_pipeline():
         # Define FLAML settings
         settings = {
             "time_budget": 60,  # seconds
-            "metric": custom_metric, # Use custom metric function
+            "metric": custom_metric, 
             "task": 'classification',
             "estimator_list": ['lrl1', 'lrl2', 'rf', 'xgboost', 'lgbm'], 
             "log_file_name": 'flaml.log',
             "seed": 42,
             "eval_method": "cv", 
             "n_splits": 5,
-            "callbacks": [mlflow_logging_callback]   
         }
         
-        # Log params
+        # Log basic metadata
         mlflow.log_param("preprocessing", "StandardScaler + OHE")
-        # Log basic settings (skip function object)
         mlflow.log_param("time_budget", 60)
         mlflow.log_param("task", "classification")
         
-        # Create artifacts directory for all best model results
+        # Create artifacts directory
         artifact_dir = "best_model_artifacts"
         os.makedirs(artifact_dir, exist_ok=True)
 
-        # Train
-        automl.fit(X_train=X_train_processed, y_train=y_train, **settings)
+        # Train: Pass callbacks explicitly to avoid passing to underlying estimator.fit
+        try:
+            automl.fit(
+                X_train=X_train_processed, 
+                y_train=y_train, 
+                callbacks=[mlflow_logging_callback], 
+                **settings
+            )
+        except TypeError as e:
+            if "callbacks" in str(e):
+                print("Warning: FLAML version issue. Falling back to training without real-time trial logging.")
+                automl.fit(X_train=X_train_processed, y_train=y_train, **settings)
+            else:
+                raise e
 
         # Individual trials are now logged in real-time via mlflow_logging_callback
         print("AutoML training complete. Best model and metrics are archived in the parent run.")
