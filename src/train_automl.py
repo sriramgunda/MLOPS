@@ -294,8 +294,8 @@ def train_pipeline():
             'rf': 'Random Forest',
             'lrl1': 'Logistic Regression (L1)',
             'lrl2': 'Logistic Regression (L2)',
-            'catboost': 'CatBoost',
-            'extra_tree': 'Extra Trees',
+            #'catboost': 'CatBoost',
+            #'extra_tree': 'Extra Trees',
             'kneighbor': 'K-Nearest Neighbors'
         }
         readable_best_model = learner_map.get(automl.best_estimator, automl.best_estimator)

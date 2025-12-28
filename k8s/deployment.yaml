@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: heart-disease-api
-        image: heart-disease-api:1.0
-        imagePullPolicy: Never
+        image: ghcr.io/sriramgunda/heart-disease-api:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 8000
