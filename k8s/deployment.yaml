@@ -12,6 +12,8 @@ spec:
       labels:
         app: heart-disease
     spec:
+      imagePullSecrets:
+      - name: ghcr-secret
       containers:
       - name: heart-disease-api
         image: ghcr.io/sriramgunda/heart-disease-api:latest
