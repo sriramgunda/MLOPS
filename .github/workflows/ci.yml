@@ -44,13 +44,13 @@ jobs:
 
     - name: Prepare Model for Docker
       run: |
-        # The training step produces 'mlflow_artifacts/inference_pipeline.pkl'
+        # The training step produces 'best_model_artifacts/inference_pipeline.pkl'
         # We copy it to 'app/model.pkl' so the Dockerfile can pick it up
-        if [ -f "mlflow_artifacts/inference_pipeline.pkl" ]; then
-          cp mlflow_artifacts/inference_pipeline.pkl app/model.pkl
+        if [ -f "best_model_artifacts/inference_pipeline.pkl" ]; then
+          cp best_model_artifacts/inference_pipeline.pkl app/model.pkl
           echo "Model prepared successfully from artifacts."
         else
-          echo "Error: inference_pipeline.pkl not found in mlflow_artifacts/"
+          echo "Error: inference_pipeline.pkl not found in best_model_artifacts/"
           exit 1
         fi
 
