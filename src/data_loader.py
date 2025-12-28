@@ -40,17 +40,9 @@ def load_data(save_path="data/heart.csv"):
             return None
             
     if df is not None:
-        print(f"Dataset shape before cleaning: {df.shape}")
-        df = df.dropna()
-        print(f"Dataset shape after dropna: {df.shape}")
-        
-        # Current target is 0, 1, 2, 3, 4. 
-        # Usually for classification we do 0 vs >0 (presence of disease).
-        df['target'] = df['target'].apply(lambda x: 1 if x > 0 else 0)
-        
+        print(f"Raw dataset loaded. Shape: {df.shape}")
         os.makedirs(os.path.dirname(save_path), exist_ok=True)
         df.to_csv(save_path, index=False)
-        print(f"Data saved to {save_path}")
         return df
         
     return df

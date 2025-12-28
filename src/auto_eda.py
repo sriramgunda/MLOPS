@@ -2,10 +2,10 @@ import pandas as pd
 import numpy as np
 
 # Patch for Sweetviz compatibility with Numpy 2.0+
-# if not hasattr(np, "VisibleDeprecationWarning"):
-#     np.VisibleDeprecationWarning = UserWarning
+if not hasattr(np, "VisibleDeprecationWarning"):
+    np.VisibleDeprecationWarning = UserWarning
 
-# import sweetviz as sv
+import sweetviz as sv
 from ydata_profiling import ProfileReport
 import os
 
@@ -26,19 +26,17 @@ def generate_report(output_dir="plots"):
     if df is None:
         return
     
-    # Create a copy for visualization purposes
-    # Convert target to string labels so Pandas Profiling uses it as a hue (color) in scatter plots
+    # Create a copy for profiling
     df_vis = df.copy()
-    df_vis['target'] = df_vis['target'].map({0: 'No Disease', 1: 'Disease'})
     
     os.makedirs(output_dir, exist_ok=True)
     
     # Sweetviz analysis
-    # print("Generating Sweetviz report...")
-    # sweetviz_report = sv.analyze(df)
-    # sweetviz_path = os.path.join(output_dir, "sweetviz_report.html")
-    # sweetviz_report.show_html(sweetviz_path)
-    # print(f"Sweetviz report saved to {sweetviz_path}")
+    print("Generating Sweetviz report...")
+    sweetviz_report = sv.analyze(df)
+    sweetviz_path = os.path.join(output_dir, "sweetviz_report.html")
+    sweetviz_report.show_html(sweetviz_path)
+    print(f"Sweetviz report saved to {sweetviz_path}")
     
     # Pandas Profiling
     print("Generating Pandas Profiling report...")

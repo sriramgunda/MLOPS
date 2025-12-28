@@ -27,15 +27,40 @@ jobs:
 
     - name: Lint Code (flake8)
       run: |
-        flake8 src/train_automl.py || true
+        flake8 heart_disease.py || true
 
     - name: Run Unit Tests
       run: |
         pytest tests/
 
-    - name: Train Model (Smoke Run)
+    - name: Train AutoML Model
       run: |
         python src/train_automl.py
+      env:
+        MLFLOW_TRACKING_URI: ./mlruns
+
+    - name: Fetch Latest Model from Registry
+      run: |
+        # Fetch the latest model URI and download it
+        export MLFLOW_TRACKING_URI=./mlruns
+        # Give MLflow a moment to finalize the registry update from the previous step
+        sleep 5
+        MODEL_URI=$(mlflow models search -m "Heart_Disease_Prediction_Pipeline" --max-results 1 | grep -o 'models:/Heart_Disease_Prediction_Pipeline/[0-9]*')
+        if [ -z "$MODEL_URI" ]; then
+          echo "Warning: Model not found in registry. Using local mlruns artifact if available."
+          # Fallback: look for the most recent run's artifact from the training step
+          # The training script creates runs in experiment 'Heart_Disease_Prediction_AutoML'
+          RUN_ID=$(ls -t mlruns | grep -v "0" | grep -v "meta.yaml" | head -n 1)
+          LATEST_RUN_DIR=$(ls -t mlruns/$RUN_ID | grep -v "meta.yaml" | head -n 1)
+          # Path to inference_pipeline.pkl in the local run artifacts
+          cp mlruns/$RUN_ID/$LATEST_RUN_DIR/artifacts/models/model.pkl app/model.pkl || cp mlruns/$RUN_ID/$LATEST_RUN_DIR/artifacts/inference_pipeline.pkl app/model.pkl || true
+        else
+          mlflow artifacts download --artifact-uri "$MODEL_URI/model.pkl" --dst-path app/
+        fi
+
+    - name: Build Docker Image
+      run: |
+        docker build -t heart-disease-api .
 
     - name: Upload MLflow Artifacts
       uses: actions/upload-artifact@v4

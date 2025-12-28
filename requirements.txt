@@ -13,3 +13,4 @@ flaml[automl]
 ydata-profiling>=4.6.0
 ipykernel>=6.0.0
 httpx
+sweetviz>=2.3.1

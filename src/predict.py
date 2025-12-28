@@ -52,16 +52,23 @@ def predict_pipeline():
         print(f"Error connecting to MLflow: {e}")
         return
 
-    # 2. Load the model from MLflow Artifacts
+    # 2. Load the model from MLflow Registry or Artifacts
+    registry_uri = "models:/Heart_Disease_Prediction_Pipeline/latest"
     model_uri = f"runs:/{latest_run_id}/inference_pipeline"
-    print(f"Loading model from URI: {model_uri} ...")
     
+    print(f"Attempting to load model from Registry: {registry_uri} ...")
     try:
-        pipeline = mlflow.sklearn.load_model(model_uri)
-        print("Pipeline loaded successfully from MLflow.")
-    except Exception as e:
-        print(f"Failed to load model from MLflow: {e}")
-        return
+        pipeline = mlflow.sklearn.load_model(registry_uri)
+        print("Pipeline loaded successfully from MLflow Model Registry.")
+    except Exception as registry_e:
+        print(f"Registry load failed (Model may not be registered yet): {registry_e}")
+        print(f"Falling back to Run-based loading from: {model_uri} ...")
+        try:
+            pipeline = mlflow.sklearn.load_model(model_uri)
+            print("Pipeline loaded successfully from MLflow Run artifacts.")
+        except Exception as run_e:
+            print(f"Failed to load model from both Registry and Runs: {run_e}")
+            return
 
     # Load Sample Raw Data (Simulating new incoming data)
     print("Loading raw data for inference test...")

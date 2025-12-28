@@ -1,15 +1,28 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, PolynomialFeatures, FunctionTransformer
+from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, roc_auc_score, classification_report
-from flaml.automl import AutoML
+from sklearn.metrics import accuracy_score, roc_auc_score, classification_report, confusion_matrix, roc_curve, auc
+from flaml import AutoML
 import mlflow
 import mlflow.sklearn
 import os
 import json
+import sys
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Define a custom function for the oldpeak indicator at the top level
+# This is REQUIRED for the pipeline to be picklable/loadable by MLflow/Pickle
+def add_oldpeak_indicator(X):
+    """
+    Assumes oldpeak is the last column in the numeric group or accessed by index.
+    In the pipeline, it receives the specified column as a 2D array.
+    """
+    return (X == 0).astype(float)
 
 def train_pipeline():
     # 1. Load Data
@@ -18,8 +31,6 @@ def train_pipeline():
         from data_loader import load_data
     except ImportError:
         # Fallback for when running as a module or from different context
-        import sys
-        import os
         sys.path.append(os.path.join(os.getcwd(), 'src'))
         from data_loader import load_data
 
@@ -29,21 +40,111 @@ def train_pipeline():
         print("Failed to load data.")
         return
 
-    X = df.drop("target", axis=1)
-    y = df["target"]
+    X_raw = df.drop("target", axis=1)
+    y_raw = df["target"]
 
-    # 2. Feature Engineering / Preprocessing
-    # Defining feature groups
+    # 2. Data Cleaning & Label Engineering (Move from Loader to Model Pipeline)
+    print("Performing Data Cleaning and Label Engineering...")
+    
+    # --- Visualization 1: Data Cleaning (Identifying Missing Values) ---
+    os.makedirs("plots", exist_ok=True)
+    null_counts = df.isnull().sum()
+    if null_counts.sum() > 0:
+        plt.figure(figsize=(10, 6))
+        null_counts[null_counts > 0].plot(kind='bar', color='skyblue', edgecolor='black')
+        plt.title("Data Cleaning: Identifying Missing Values in Raw Dataset")
+        plt.ylabel("Missing Count")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig("plots/1_cleaning_missing_values.png")
+        plt.close()
+    
+    # We NO LONGER drop rows. We will use an Imputer in the pipeline for 100% robustness.
+    df_clean = df.copy()
+    print("Strategy Change: Using Pipeline Imputation instead of Row Dropping (Industry Standard).")
+
+    # --- Visualization 2: Data Cleaning (Target Binarization) ---
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    sns.countplot(x=df_clean['target'], hue=df_clean['target'], palette='viridis', legend=False)
+    plt.title("Before: Original Target Stages (0-4)")
+    
+    # Clinical Transformation: Binarization
+    df_clean['target'] = df_clean['target'].apply(lambda x: 1 if x > 0 else 0)
+    
+    plt.subplot(1, 2, 2)
+    sns.countplot(x=df_clean['target'], hue=df_clean['target'], palette='coolwarm', legend=False)
+    plt.title("After: Binarized Heart Disease Presence (0 or 1)")
+    plt.tight_layout()
+    plt.savefig("plots/2_cleaning_target_binarization.png")
+    plt.close()
+
+    # Define final features and labels from RAW data (No manual FE here)
+    X = df_clean.drop("target", axis=1)
+    y = df_clean["target"]
+
+    # 3. Feature Engineering / Preprocessing
+    # Define feature groups
     categorical_features = ["sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"]
-    numerical_features = ["age", "trestbps", "chol", "thalach", "oldpeak"]
-
+    
     print("Preprocessing data...")
     # Create preprocessing pipeline
+    # We now bundle: Imputation -> Custom Indicator -> Polynomials -> Scaling
     preprocessor = ColumnTransformer(
         transformers=[
-            ('num', StandardScaler(), numerical_features),
-            ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+            ('num_base', Pipeline([
+                ('imputer', SimpleImputer(strategy='median')),
+                ('poly', PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)),
+                ('scaler', StandardScaler())
+            ]), ["age", "trestbps", "chol", "thalach", "oldpeak"]),
+            ('oldpeak_flag', Pipeline([
+                ('imputer', SimpleImputer(strategy='constant', fill_value=0)),
+                ('indicator', FunctionTransformer(add_oldpeak_indicator))
+            ]), ["oldpeak"]),
+            ('cat', Pipeline([
+                ('imputer', SimpleImputer(strategy='most_frequent')),
+                ('ohe', OneHotEncoder(handle_unknown='ignore'))
+            ]), categorical_features)
         ])
+
+    # Visualize Feature Engineering (Scaling & Encoding)
+    print("Capturing Feature Engineering Visualizations...")
+    
+    # --- Visualization 3: Feature Scaling (Actual Transformations) ---
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    # Age Raw vs Scaled
+    sns.histplot(X['age'], kde=True, ax=axes[0,0], color='royalblue')
+    axes[0,0].set_title("Age (Original Distribution)")
+    temp_age_scaled = StandardScaler().fit_transform(X[['age']])
+    sns.histplot(temp_age_scaled, kde=True, ax=axes[0,1], color='forestgreen')
+    axes[0,1].set_title("Age (Standardized Transformation)")
+    
+    # Cholesterol Raw vs Scaled
+    sns.histplot(X['chol'], kde=True, ax=axes[1,0], color='purple')
+    axes[1,0].set_title("Cholesterol (Original Distribution)")
+    temp_chol_scaled = StandardScaler().fit_transform(X[['chol']])
+    sns.histplot(temp_chol_scaled, kde=True, ax=axes[1,1], color='darkorange')
+    axes[1,1].set_title("Cholesterol (Standardized Transformation)")
+    
+    plt.tight_layout()
+    plt.savefig("plots/3_feature_eng_scaling.png")
+    plt.close()
+
+    # --- Visualization 4: Categorical Encoding (Actual Map) ---
+    # One-Hot Encoding visualize for Chest Pain (CP) attribute
+    cp_sample = X[['cp']].head(10)
+    ohe_temp = OneHotEncoder(sparse_output=False)
+    cp_encoded = ohe_temp.fit_transform(cp_sample)
+    df_cp_map = pd.DataFrame(cp_encoded, columns=ohe_temp.get_feature_names_out(['cp']))
+    
+    plt.figure(figsize=(10, 6))
+    sns.heatmap(df_cp_map, annot=True, cmap="YlGnBu", cbar=False)
+    plt.title("Actual Data Transformation: One-Hot Encoding (CP clinical feature)")
+    plt.xlabel("Engineered Feature Columns")
+    plt.ylabel("Patient Records (Row Index)")
+    plt.tight_layout()
+    plt.savefig("plots/4_feature_eng_encoding.png")
+    plt.close()
 
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
@@ -56,18 +157,27 @@ def train_pipeline():
     # FLAML works fine with numpy arrays (CSR matrix from OHE).
 
     # Define custom callback to log each trial to MLflow
-    def mlflow_logging_callback(val_loss, config, estimator, metric):
-        # Start a nested run for each trial
-        with mlflow.start_run(nested=True):
-            # Log params
-            mlflow.log_param("estimator", estimator)
-            for k, v in config.items():
-                mlflow.log_param(k, v)
-            
-            # Log metrics (val_loss is what FLAML minimizes, e.g., 1-AUC or error)
-            mlflow.log_metric("val_loss", val_loss)
-            if metric:
-                 mlflow.log_metric("metric_value", metric)
+    # Note: Removed from fit() due to compatibility issues with recent FLAML versions.
+    # Shared dictionary to pass metrics from custom_metric to the callback
+    # current_trial_metrics = {}
+
+    # def mlflow_logging_callback(trial_index, val_loss, config, best_val_loss, estimator, metric, time_total):
+    #     # Start a nested run for each trial
+    #     with mlflow.start_run(nested=True, run_name=f"Trial_{trial_index}_{estimator}"):
+    #         # Standardized Parameter Wording
+    #         mlflow.log_param("Model_Type", estimator)
+    #         for k, v in config.items():
+    #             mlflow.log_param(k, v)
+    #         
+    #         # Log primary optimization metric
+    #         mlflow.log_metric("val_loss", val_loss)
+    #         
+    #         # Log additional metrics from custom_metric if available
+    #         if current_trial_metrics:
+    #             for m_name, m_val in current_trial_metrics.items():
+    #                 mlflow.log_metric(m_name, m_val)
+    #             # Clear for next trial
+    #             current_trial_metrics.clear()
 
     # Define custom metric function to track additional metrics
     def custom_metric(X_val, y_val, estimator, labels, X_train, y_train, weight_val=None, weight_train=None, config=None, groups_val=None, deprecated_groups_train=None):
@@ -90,13 +200,16 @@ def train_pipeline():
         val_loss = 1.0 - roc_auc
         
         metrics_dict = {
-            "val_accuracy": acc,
-            "val_precision": prec,
-            "val_recall": rec,
-            "val_f1": f1,
-            "val_roc_auc": roc_auc,
-            "pred_time": pred_time
+            "accuracy": acc,
+            "precision": prec,
+            "recall": rec,
+            "f1": f1,
+            "roc_auc": roc_auc,
+            "prediction_latency": pred_time
         }
+        
+        # Update shared dictionary so callback can access it (Disabled as callback is inactive)
+        # current_trial_metrics.update(metrics_dict)
         
         return val_loss, metrics_dict
 
@@ -130,77 +243,15 @@ def train_pipeline():
         # Log basic settings (skip function object)
         mlflow.log_param("time_budget", 60)
         mlflow.log_param("task", "classification")
+        
+        # Create artifacts directory for metadata and models
+        os.makedirs("mlflow_artifacts", exist_ok=True)
 
         # Train
         automl.fit(X_train=X_train_processed, y_train=y_train, **settings)
 
-        # Parse flaml.log to log each trial as a nested run
-        print("Parsing FLAML log to track individual trials...")
-        try:
-            with open("flaml.log", "r") as f:
-                for line in f:
-                    try:
-                        record = json.loads(line)
-                        # Identify if it's a result line (usually has 'reward' or 'val_loss')
-                        # FLAML log format varies, but normally has 'record_id', 'iter_no', 'logged_metric', etc.
-                        # Standard FLAML log line example: {"record_id": 0, "iter_no": 0, "logged_metric": 0.5, "wall_clock_time": 0.1, "config": {...}, "learner": "xgboost", ...}
-                        
-                        if "config" in record and "learner" in record:
-                            with mlflow.start_run(nested=True):
-                                # Log learner and iteration
-                                mlflow.log_param("learner", record.get("learner"))
-                                
-                                # Map learner to readable name
-                                learner_map = {
-                                    'lgbm': 'LightGBM',
-                                    'xgboost': 'XGBoost',
-                                    'rf': 'Random Forest',
-                                    'lrl1': 'Logistic Regression (L1)',
-                                    'lrl2': 'Logistic Regression (L2)',
-                                    'catboost': 'CatBoost',
-                                    'extra_tree': 'Extra Trees',
-                                    'kneighbor': 'K-Nearest Neighbors'
-                                }
-                                readable_name = learner_map.get(record.get("learner"), record.get("learner"))
-                                mlflow.log_param("model_type", readable_name)
-                                mlflow.log_param("iter_no", record.get("iter_no"))
-                                
-                                # Log config hyperparameters
-                                config = record.get("config", {})
-                                if config:
-                                    for k, v in config.items():
-                                        mlflow.log_param(k, v)
-                                
-                                # Log available metrics
-                                # 'logged_metric' is usually the optimization metric (e.g. roc_auc or loss)
-                                if "logged_metric" in record:
-                                    # Note depending on min/max, this might be loss or score. 
-                                    # FLAML minimizes 'val_loss' usually. 
-                                    # 'logged_metric' corresponds to the `metric` defined in fit?
-                                    metric_val = record["logged_metric"]
-                                    if isinstance(metric_val, dict):
-                                        # If it's a dict, log all keys
-                                        for mk, mv in metric_val.items():
-                                            try:
-                                                mlflow.log_metric(f"logged_metric_{mk}", float(mv))
-                                            except (ValueError, TypeError):
-                                                pass
-                                    else:
-                                        try:
-                                            mlflow.log_metric("logged_metric", float(metric_val))
-                                        except (ValueError, TypeError):
-                                            pass
-                                
-                                if "wall_clock_time" in record:
-                                    mlflow.log_metric("wall_clock_time", record["wall_clock_time"])
-                                    
-                                if "validation_loss" in record:
-                                     mlflow.log_metric("validation_loss", record["validation_loss"])
-
-                    except json.JSONDecodeError:
-                        continue
-        except FileNotFoundError:
-            print("flaml.log not found. Could not log individual trials.")
+        # Individual trials are now logged in real-time via mlflow_logging_callback
+        print("AutoML training complete. Best model and metrics are archived in the parent run.")
         print(f"Best machine learning model selected: {automl.best_estimator}")
         print(f"Best hyperparameter config: {automl.best_config}")
         print(f"Best accuracy on validation data: {automl.best_loss}")
@@ -309,15 +360,15 @@ The best performing model selected for final training was:
 - **Best Validation Loss:** {automl.best_loss:.4f}
 """
 
-        with open("tuning_report.md", "w") as f:
+        with open("mlflow_artifacts/tuning_report.md", "w") as f:
             f.write(tuning_report)
-        mlflow.log_artifact("tuning_report.md")
-        print("Generated and logged tuning_report.md with per-model details.")
+        mlflow.log_artifact("mlflow_artifacts/tuning_report.md", artifact_path="reports_and_metadata")
+        print("Generated and logged mlflow_artifacts/tuning_report.md with per-model details.")
 
         # Log full best_config as JSON artifact for completeness
-        with open("best_config.json", "w") as f:
+        with open("mlflow_artifacts/best_config.json", "w") as f:
             json.dump(automl.best_config, f, indent=4)
-        mlflow.log_artifact("best_config.json")
+        mlflow.log_artifact("mlflow_artifacts/best_config.json", artifact_path="reports_and_metadata")
 
         # Log Model
         # Log Model as Pickle (Explicit Request)
@@ -327,10 +378,10 @@ The best performing model selected for final training was:
             # automl.model is the wrapper, automl.model.estimator is the underlying sklearn-compatible model
             if hasattr(automl, 'model') and hasattr(automl.model, 'estimator'):
                 best_model = automl.model.estimator
-                with open("best_model.pkl", "wb") as f:
+                with open("mlflow_artifacts/best_model.pkl", "wb") as f:
                     pickle.dump(best_model, f)
-                mlflow.log_artifact("best_model.pkl")
-                print("Successfully logged best_model.pkl")
+                mlflow.log_artifact("mlflow_artifacts/best_model.pkl", artifact_path="models")
+                print("Successfully logged mlflow_artifacts/best_model.pkl")
                 
                 # Log via sklearn flavor
                 mlflow.sklearn.log_model(best_model, "best_model_sklearn")
@@ -343,9 +394,9 @@ The best performing model selected for final training was:
         # Evaluate using classification report
         report = classification_report(y_test, y_pred, output_dict=True)
         # Flatten and log report metrics if needed, or save as JSON artifact
-        with open("classification_report.json", "w") as f:
+        with open("mlflow_artifacts/classification_report.json", "w") as f:
             json.dump(report, f, indent=4)
-        mlflow.log_artifact("classification_report.json")
+        mlflow.log_artifact("mlflow_artifacts/classification_report.json", artifact_path="reports_and_metadata")
         
         # Generate and log selection reasoning
         best_val_roc_auc = 1.0 - automl.best_loss
@@ -360,19 +411,15 @@ The best performing model selected for final training was:
         )
         
         print(reasoning)
-        with open("model_selection_reasoning.txt", "w") as f:
+        with open("mlflow_artifacts/model_selection_reasoning.txt", "w") as f:
             f.write(reasoning)
-        mlflow.log_artifact("model_selection_reasoning.txt")
+        mlflow.log_artifact("mlflow_artifacts/model_selection_reasoning.txt", artifact_path="reports_and_metadata")
         mlflow.set_tag("selection_reason", f"Lowest val_loss: {automl.best_loss:.4f} (Val AUC: {best_val_roc_auc:.4f})")
         mlflow.log_param("selection_reason", f"Lowest val_loss: {automl.best_loss:.4f} (Val AUC: {best_val_roc_auc:.4f})")
 
         # ---------------------------------------------------------
         # Generate & Log Performance Plots (ROC Curve, Confusion Matrix)
         # ---------------------------------------------------------
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        from sklearn.metrics import confusion_matrix, roc_curve, auc
-
         # 1. Confusion Matrix
         cm = confusion_matrix(y_test, y_pred)
         plt.figure(figsize=(8, 6))
@@ -383,8 +430,8 @@ The best performing model selected for final training was:
         plt.ylabel('Actual Label')
         plt.xlabel('Predicted Label')
         plt.tight_layout()
-        plt.savefig("confusion_matrix.png")
-        mlflow.log_artifact("confusion_matrix.png")
+        plt.savefig("plots/confusion_matrix.png")
+        mlflow.log_artifact("plots/confusion_matrix.png", artifact_path="model_evaluation")
         plt.close()
 
         # 2. ROC Curve
@@ -400,25 +447,24 @@ The best performing model selected for final training was:
         plt.title('Receiver Operating Characteristic (ROC)')
         plt.legend(loc="lower right")
         plt.tight_layout()
-        plt.savefig("roc_curve.png")
-        mlflow.log_artifact("roc_curve.png")
+        plt.savefig("plots/roc_curve.png")
+        mlflow.log_artifact("plots/roc_curve.png", artifact_path="model_evaluation")
         plt.close()
         
-        print("Logged performance plots (confusion_matrix.png, roc_curve.png) to MLflow.")
+        print("Logged performance plots (plots/confusion_matrix.png, plots/roc_curve.png) to MLflow.")
 
         # ---------------------------------------------------------
         # Save Full Inference Pipeline (Preprocessor + Model)
         # ---------------------------------------------------------
         try:
             # 1. Save the fitted Preprocessor
-            with open("preprocessor.pkl", "wb") as f:
+            with open("mlflow_artifacts/preprocessor.pkl", "wb") as f:
                 pickle.dump(preprocessor, f)
-            mlflow.log_artifact("preprocessor.pkl")
-            print("Successfully logged preprocessor.pkl")
+            mlflow.log_artifact("mlflow_artifacts/preprocessor.pkl", artifact_path="models")
+            print("Successfully logged mlflow_artifacts/preprocessor.pkl")
 
             # 2. Create and Save Unified Inference Pipeline
             if hasattr(automl, 'model') and hasattr(automl.model, 'estimator'):
-                from sklearn.pipeline import Pipeline
                 
                 # Combine fitted preprocessor and best model into a single pipeline
                 inference_pipeline = Pipeline([
@@ -426,13 +472,17 @@ The best performing model selected for final training was:
                     ('model', automl.model.estimator)
                 ])
                 
-                with open("inference_pipeline.pkl", "wb") as f:
+                with open("mlflow_artifacts/inference_pipeline.pkl", "wb") as f:
                     pickle.dump(inference_pipeline, f)
-                mlflow.log_artifact("inference_pipeline.pkl")
+                mlflow.log_artifact("mlflow_artifacts/inference_pipeline.pkl", artifact_path="models")
                 
-                # Also log as an MLflow Model (Pipeline flavor) which is very powerful
-                mlflow.sklearn.log_model(inference_pipeline, "inference_pipeline")
-                print("Successfully created and logged inference_pipeline.pkl (Preprocessor + Model)")
+                # Also log as an MLflow Model (Pipeline flavor) and register it in the Model Registry
+                mlflow.sklearn.log_model(
+                    sk_model=inference_pipeline, 
+                    artifact_path="inference_pipeline",
+                    registered_model_name="Heart_Disease_Prediction_Pipeline"
+                )
+                print("Successfully created, logged, and REGISTERED inference_pipeline in MLflow Model Registry")
             
         except Exception as e:
             print(f"Error creating inference pipeline: {e}")

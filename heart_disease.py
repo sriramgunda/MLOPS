@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import mlflow
 import mlflow.sklearn
+import os
 
 from ucimlrepo import fetch_ucirepo
 from sklearn.model_selection import StratifiedKFold, cross_validate
@@ -28,6 +29,7 @@ y = y["num"].apply(lambda x: 1 if x > 0 else 0)
 # ===============================
 # 2. DATA CLEANING
 # ===============================
+os.makedirs("plots", exist_ok=True)
 
 # Missing values check
 print("Missing values:\n", X.isnull().sum())
@@ -40,20 +42,20 @@ print("Missing values:\n", X.isnull().sum())
 plt.figure(figsize=(4, 4))
 sns.countplot(x=y)
 plt.title("Class Distribution (Heart Disease)")
-plt.savefig("class_balance.png")
+plt.savefig("plots/class_balance.png")
 plt.close()
 
 # Feature distributions
 X.hist(figsize=(15, 10), bins=20)
 plt.suptitle("Feature Distributions")
-plt.savefig("feature_distributions.png")
+plt.savefig("plots/feature_distributions.png")
 plt.close()
 
 # Correlation heatmap
 plt.figure(figsize=(12, 8))
 sns.heatmap(pd.concat([X, y], axis=1).corr(), cmap="coolwarm")
 plt.title("Correlation Heatmap")
-plt.savefig("correlation_heatmap.png")
+plt.savefig("plots/correlation_heatmap.png")
 plt.close()
 
 # ===============================
