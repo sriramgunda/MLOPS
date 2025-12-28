@@ -14,6 +14,7 @@ import json
 import sys
 import matplotlib.pyplot as plt
 import seaborn as sns
+import inspect
 
 # Standardized Mapping for Learners
 LEARNER_MAP = {
@@ -25,6 +26,19 @@ LEARNER_MAP = {
     #'catboost': 'CatBoost',
     #'extra_tree': 'Extra Trees',
     'kneighbor': 'K-Nearest Neighbors'
+}
+
+# Mapping for human-readable hyperparameter names in reports
+HP_NAME_MAP = {
+    'C': 'Regularization Constant (C)',
+    'n_estimators': 'Number of Trees (n_estimators)',
+    'max_depth': 'Maximum Depth (max_depth)',
+    'learning_rate': 'Learning Rate (learning_rate)',
+    'num_leaves': 'Number of Leaves (num_leaves)',
+    'max_features': 'Max Features (max_features)',
+    'min_child_samples': 'Min Child Samples (min_child_samples)',
+    'reg_alpha': 'L1 Regularization (reg_alpha)',
+    'reg_lambda': 'L2 Regularization (reg_lambda)',
 }
 
 def add_oldpeak_indicator(X):
@@ -262,20 +276,31 @@ def train_pipeline():
         artifact_dir = "best_model_artifacts"
         os.makedirs(artifact_dir, exist_ok=True)
 
-        # Train: Pass callbacks explicitly to avoid passing to underlying estimator.fit
-        try:
-            automl.fit(
-                X_train=X_train_processed, 
-                y_train=y_train, 
-                callbacks=[mlflow_logging_callback], 
-                **settings
-            )
-        except TypeError as e:
-            if "callbacks" in str(e):
-                print("Warning: FLAML version issue. Falling back to training without real-time trial logging.")
-                automl.fit(X_train=X_train_processed, y_train=y_train, **settings)
-            else:
-                raise e
+        # Prepare fit arguments
+        fit_kwargs = {
+            "X_train": X_train_processed,
+            "y_train": y_train,
+            **settings
+        }
+
+        # Save AutoML configurations as artifact 
+        config_artifact_path = os.path.join(artifact_dir, "automl_user_configurations.json")
+        with open(config_artifact_path, "w") as f:
+            # We filter out non-serializable objects (functions) if they exist
+            serializable_settings = {k: (str(v) if callable(v) else v) for k, v in settings.items()}
+            json.dump(serializable_settings, f, indent=4)
+        mlflow.log_artifact(config_artifact_path, artifact_path=artifact_dir)
+
+        # Only pass 'callbacks' if the installed FLAML version supports it
+        sig = inspect.signature(automl.fit)
+        if "callbacks" in sig.parameters:
+            fit_kwargs["callbacks"] = [mlflow_logging_callback]
+            print("Starting AutoML with real-time trial logging...")
+        else:
+            print("Warning: FLAML version issue. Training without real-time trial logging.")
+
+        # Train
+        automl.fit(**fit_kwargs)
 
         # Individual trials are now logged in real-time via mlflow_logging_callback
         print("AutoML training complete. Best model and metrics are archived in the parent run.")
@@ -368,7 +393,14 @@ The best configuration found for each model type explored:
             readable_name = LEARNER_MAP.get(learner, learner)
             tuning_report += f"### {readable_name} ({learner})\n"
             tuning_report += f"- **Best Validation Loss:** {stats['error']:.4f}\n"
-            tuning_report += f"- **Best Configuration:**\n```json\n{json.dumps(stats['config'], indent=4)}\n```\n\n"
+            
+            # Format configuration with human-readable names
+            readable_config = {}
+            for k, v in stats['config'].items():
+                name = HP_NAME_MAP.get(k, k)
+                readable_config[name] = v
+                
+            tuning_report += f"- **Best Configuration:**\n```json\n{json.dumps(readable_config, indent=4)}\n```\n\n"
 
         tuning_report += f"""## 4. Overall Winner
 The best performing model selected for final training was:
