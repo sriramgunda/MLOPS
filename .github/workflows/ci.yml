@@ -27,7 +27,7 @@ jobs:
 
     - name: Lint Code (flake8)
       run: |
-        flake8 heart_disease.py || true
+        flake8 src/train_automl.py || true
 
     - name: Run Unit Tests
       run: |
@@ -35,7 +35,7 @@ jobs:
 
     - name: Train Model (Smoke Run)
       run: |
-        python src\train_automl.py
+        python src/train_automl.py
 
     - name: Upload MLflow Artifacts
       uses: actions/upload-artifact@v4
