@@ -225,8 +225,12 @@ def train_pipeline():
         
         pred_time = (time.time() - start) / len(X_val)
         
-        # Minimizing 1 - roc_auc
-        val_loss = 1.0 - roc_auc
+        
+        # Minimizing 1 - (0.5 * Recall + 0.5 * ROC_AUC)
+        # We prioritize Recall (Critical for medical diagnosis) while keeping ROC_AUC for stability
+        # avoiding models that just predict class 1 everywhere (which would have perfect recall but poor AUC)
+        composite_score = 0.5 * rec + 0.5 * roc_auc
+        val_loss = 1.0 - composite_score
         
         metrics_dict = {
             "accuracy": acc,
@@ -271,6 +275,7 @@ def train_pipeline():
         mlflow.log_param("preprocessing", "StandardScaler + OHE")
         mlflow.log_param("time_budget", 60)
         mlflow.log_param("task", "classification")
+        mlflow.log_param("metric_strategy", "Minimize 1 - (0.5 * Recall + 0.5 * ROC_AUC)")
         
         # Create artifacts directory
         artifact_dir = "best_model_artifacts"
@@ -349,9 +354,11 @@ def train_pipeline():
         # Generate Explicit Tuning Report with Per-Model Details
         # ---------------------------------------------------------
         
-        # Parse log for per-learner bests
+        # Parse log for per-learner bests and all trial history for visualization
         learner_stats = {} # learner_name -> {'error': float, 'config': dict}
-        
+        learner_stats = {} # learner_name -> {'error': float, 'config': dict}
+
+        print("Parsing FLAML log for tuning report...")
         try:
             with open('flaml.log', 'r') as f:
                 for line in f:
@@ -359,25 +366,27 @@ def train_pipeline():
                         data = json.loads(line.strip())
                         curr_learner = data.get('learner')
                         curr_error = data.get('validation_loss') # FLAML minimizes validation_loss
-
+                        
                         if curr_learner and curr_error is not None:
-                             # Keep the best (lowest error) seen for this learnerso far
-                             if curr_learner not in learner_stats or curr_error < learner_stats[curr_learner]['error']:
-                                 learner_stats[curr_learner] = {
-                                     'error': curr_error,
-                                     'config': data.get('config')
-                                 }
+                            # 1. Update Best Stats
+                            if curr_learner not in learner_stats or curr_error < learner_stats[curr_learner]['error']:
+                                learner_stats[curr_learner] = {
+                                    'error': curr_error,
+                                    'config': data.get('config')
+                                }
                     except:
                         continue
         except FileNotFoundError:
             print("Log file not found, skipping per-model detail parsing.")
+
+
 
         tuning_report = f"""# Auto-ML Model Selection and Hyperparameter Tuning Report
 
 ## 1. Tuning Strategy
 - **Framework:** FLAML (Fast and Lightweight AutoML)
 - **Time Budget:** {settings['time_budget']} seconds
-- **Metric:** {settings['metric']} (Minimize 1 - ROC_AUC)
+- **Metric:** {settings['metric']} (Minimize 1 - (0.5 * Recall + 0.5 * ROC_AUC))
 
 ## 2. Models Explored
 The pipeline searched across the following algorithm families:
@@ -451,14 +460,18 @@ The best performing model selected for final training was:
         mlflow.log_artifact(report_json_path, artifact_path=artifact_dir)
         
         # Generate and log selection reasoning
-        best_val_roc_auc = 1.0 - automl.best_loss
+        best_val_score = 1.0 - automl.best_loss
         reasoning = (
             f"Model Selection Reasoning:\n"
             f"--------------------------\n"
             f"The model '{readable_best_model}' ({automl.best_estimator}) was selected as the best model because:\n"
-            f"1. Optimization Goal: Minimize 'val_loss' (defined as 1 - ROC_AUC)\n"
-            f"2. Performance: It achieved the lowest validation loss of {automl.best_loss:.4f}\n"
-            f"3. Metric Equivalent: This corresponds to a Validation ROC AUC of {best_val_roc_auc:.4f}\n"
+            f"1. Optimization Goal: Minimize 'val_loss' (defined as 1 - (0.5 * Recall + 0.5 * ROC_AUC))\n"
+            f"   - This prioritizes models with high Recall (sensitivity) while maintaining good discrimination (AUC).\n"
+            f"2. Validation Performance: It achieved the lowest validation loss of {automl.best_loss:.4f}\n"
+            f"   - Validation Composite Score: {best_val_score:.4f}\n"
+            f"3. Indicative Performance (Test Set):\n"
+            f"   - Recall: {recall:.4f}\n"
+            f"   - ROC AUC: {roc_auc:.4f}\n"
             f"4. Constraints: The selection was made within a time budget of {settings['time_budget']} seconds.\n"
         )
         
@@ -467,8 +480,9 @@ The best performing model selected for final training was:
         with open(reasoning_path, "w") as f:
             f.write(reasoning)
         mlflow.log_artifact(reasoning_path, artifact_path=artifact_dir)
-        mlflow.set_tag("selection_reason", f"Lowest val_loss: {automl.best_loss:.4f} (Val AUC: {best_val_roc_auc:.4f})")
-        mlflow.log_param("selection_reason", f"Lowest val_loss: {automl.best_loss:.4f} (Val AUC: {best_val_roc_auc:.4f})")
+        # Log selection metrics as tags for easy retrieval
+        mlflow.set_tag("selection_reason", f"Best Val Loss: {automl.best_loss:.4f}")
+        mlflow.log_param("selection_reason", f"Score: {best_val_score:.4f} (Rec:{recall:.4f}, AUC:{roc_auc:.4f})")
 
         # ---------------------------------------------------------
         # Generate & Log Performance Plots (ROC Curve, Confusion Matrix)
