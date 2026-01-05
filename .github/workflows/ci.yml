@@ -69,7 +69,7 @@ jobs:
         VERSION=latest
         
         echo "Building $IMAGE_ID:$VERSION"
-        docker build -t $IMAGE_ID:$VERSION .
+        docker build --no-cache -t $IMAGE_ID:$VERSION .
         docker push $IMAGE_ID:$VERSION
 
     - name: Upload MLflow Artifacts
