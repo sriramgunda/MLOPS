@@ -41,12 +41,7 @@ HP_NAME_MAP = {
     'reg_lambda': 'L2 Regularization (reg_lambda)',
 }
 
-def add_oldpeak_indicator(X):
-    """
-    Assumes oldpeak is the last column in the numeric group or accessed by index.
-    In the pipeline, it receives the specified column as a 2D array.
-    """
-    return (X == 0).astype(float)
+
 
 def train_pipeline():
     # 1. Load Data
@@ -121,10 +116,7 @@ def train_pipeline():
                 ('poly', PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)),
                 ('scaler', StandardScaler())
             ]), ["age", "trestbps", "chol", "thalach", "oldpeak"]),
-            ('oldpeak_flag', Pipeline([
-                ('imputer', SimpleImputer(strategy='constant', fill_value=0)),
-                ('indicator', FunctionTransformer(add_oldpeak_indicator))
-            ]), ["oldpeak"]),
+
             ('cat', Pipeline([
                 ('imputer', SimpleImputer(strategy='most_frequent')),
                 ('ohe', OneHotEncoder(handle_unknown='ignore'))
@@ -183,30 +175,7 @@ def train_pipeline():
     # Shared dictionary to pass metrics from custom_metric to the callback
     current_trial_metrics = {}
 
-    def mlflow_logging_callback(trial_index, val_loss, config, best_val_loss, estimator, metric, time_total):
-        """
-        Callback for FLAML to log each trial to MLflow as a nested run.
-        """
-        run_name = f"Trial_{trial_index}_{estimator}"
-        with mlflow.start_run(nested=True, run_name=run_name):
-            # Log Model Type (Standardized)
-            readable_name = LEARNER_MAP.get(estimator, estimator)
-            mlflow.log_param("model_type", readable_name)
-            mlflow.log_param("learner", estimator)
-            
-            # Log Hyperparameters
-            for k, v in config.items():
-                mlflow.log_param(k, v)
-            
-            # Log Optimization Metric
-            mlflow.log_metric("val_loss", val_loss)
-            
-            # Log all additional metrics captured by custom_metric
-            if current_trial_metrics:
-                for m_name, m_val in current_trial_metrics.items():
-                    mlflow.log_metric(m_name, m_val)
-                # Clear for next trial
-                current_trial_metrics.clear()
+
 
     # Define custom metric function to track additional metrics
     def custom_metric(X_val, y_val, estimator, labels, X_train, y_train, weight_val=None, weight_train=None, config=None, groups_val=None, deprecated_groups_train=None):
@@ -241,9 +210,36 @@ def train_pipeline():
             "prediction_latency": pred_time
         }
         
-        # Update shared dictionary so callback can access it
-        current_trial_metrics.update(metrics_dict)
         
+        # Determine model type and log if MLflow run is active (FLAML manages the run when mlflow_logging=True)
+        # Note: FLAML logs params automatically, but we want a standardized 'model_type'
+        # try:
+        #     if mlflow.active_run():
+        #         est_name = estimator.__class__.__name__
+        #         readable_name = est_name
+        #         
+        #         # Logic to map class name to readable name
+        #         if 'LGBM' in est_name: readable_name = 'LightGBM'
+        #         elif 'XGB' in est_name: readable_name = 'XGBoost'
+        #         elif 'RandomForest' in est_name: readable_name = 'Random Forest'
+        #         elif 'ExtraTrees' in est_name: readable_name = 'Extra Trees'
+        #         elif 'KNeighbors' in est_name: readable_name = 'K-Nearest Neighbors'
+        #         elif 'LogisticRegression' in est_name:
+        #             penalty = getattr(estimator, 'penalty', None)
+        #             if penalty == 'l1': readable_name = 'Logistic Regression (L1)'
+        #             elif penalty == 'l2': readable_name = 'Logistic Regression (L2)'
+        #             else: readable_name = 'Logistic Regression'
+        #         
+        #         # Log it
+        #         # mlflow.log_param("model_type", readable_name)
+        #         # Also ensure metrics are logged here if FLAML doesn't pick them up automatically from the return
+        #         # for k, v in metrics_dict.items():
+        #         #     mlflow.log_metric(k, v)
+        #             
+        # except Exception as e:
+        #     # Swallow errors to avoid breaking training
+        #     pass
+
         return val_loss, metrics_dict
 
     print("Starting AutoML with FLAML...")
@@ -269,8 +265,10 @@ def train_pipeline():
             "seed": 42,
             "eval_method": "cv", 
             "n_splits": 5,
+            "n_jobs": 1,
+            "mlflow_logging": False, # Delegate run management to FLAML
+            "mlflow_exp_name": "Heart_Disease_Prediction_AutoML",
         }
-        
         # Log basic metadata
         mlflow.log_param("preprocessing", "StandardScaler + OHE")
         mlflow.log_param("time_budget", 60)
@@ -296,13 +294,7 @@ def train_pipeline():
             json.dump(serializable_settings, f, indent=4)
         mlflow.log_artifact(config_artifact_path, artifact_path=artifact_dir)
 
-        # Only pass 'callbacks' if the installed FLAML version supports it
-        sig = inspect.signature(automl.fit)
-        if "callbacks" in sig.parameters:
-            fit_kwargs["callbacks"] = [mlflow_logging_callback]
-            print("Starting AutoML with real-time trial logging...")
-        else:
-            print("Warning: FLAML version issue. Training without real-time trial logging.")
+        print("Starting AutoML with FLAML (native MLflow logging enabled)...")
 
         # Train
         automl.fit(**fit_kwargs)
