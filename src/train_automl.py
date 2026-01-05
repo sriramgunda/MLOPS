@@ -266,7 +266,7 @@ def train_pipeline():
             "eval_method": "cv", 
             "n_splits": 5,
             "n_jobs": 1,
-            "mlflow_logging": False, # Delegate run management to FLAML
+            "mlflow_logging": True, # Delegate run management to FLAML
             "mlflow_exp_name": "Heart_Disease_Prediction_AutoML",
         }
         # Log basic metadata
@@ -462,6 +462,7 @@ The best performing model selected for final training was:
             f"2. Validation Performance: It achieved the lowest validation loss of {automl.best_loss:.4f}\n"
             f"   - Validation Composite Score: {best_val_score:.4f}\n"
             f"3. Indicative Performance (Test Set):\n"
+            f"   - Accuracy: {acc:.4f}\n"
             f"   - Recall: {recall:.4f}\n"
             f"   - ROC AUC: {roc_auc:.4f}\n"
             f"4. Constraints: The selection was made within a time budget of {settings['time_budget']} seconds.\n"
