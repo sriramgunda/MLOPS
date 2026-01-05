@@ -79,15 +79,15 @@ def predict_heart_disease(data: PatientInput):
 
     df = pd.DataFrame([data.dict()])
     
-    prediction = model.predict(df)[0]
-    probability = model.predict_proba(df)[0][1]
+    prediction = int(model.predict(df)[0])
+    probability = float(model.predict_proba(df)[0][1])
 
     logger.info(
         f"Prediction={prediction}, Confidence={probability:.4f}"
     )
 
     return {
-        "prediction": int(prediction),
+        "prediction": prediction,
         "confidence": round(probability, 4)
     }
 
