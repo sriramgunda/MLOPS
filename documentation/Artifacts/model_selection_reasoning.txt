@@ -1,0 +1,12 @@
+Model Selection Reasoning:
+--------------------------
+The model 'XGBoost' (xgboost) was selected as the best model because:
+1. Optimization Goal: Minimize 'val_loss' (defined as 1 - (0.5 * Recall + 0.5 * ROC_AUC))
+   - This prioritizes models with high Recall (sensitivity) while maintaining good discrimination (AUC).
+2. Validation Performance: It achieved the lowest validation loss of 0.1534
+   - Validation Composite Score: 0.8466
+3. Indicative Performance (Test Set):
+   - Accuracy: 0.9016
+   - Recall: 0.9016
+   - ROC AUC: 0.9497
+4. Constraints: The selection was made within a time budget of 60 seconds.
