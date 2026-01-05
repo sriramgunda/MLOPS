@@ -39,12 +39,24 @@ jobs:
     - name: Run EDA
       run: |
         python src/auto_eda.py
+
+    - name: Upload EDA Reports
+      uses: actions/upload-artifact@v4
+      with:
+        name: eda-reports
+        path: plots/
       
     - name: Train AutoML Model
       run: |
         python src/train_automl.py
       env:
         MLFLOW_TRACKING_URI: ./mlruns
+
+    - name: Upload MLflow Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: mlflow-runs
+        path: mlruns/
 
     - name: Prepare Model for Docker
       run: |
@@ -75,15 +87,3 @@ jobs:
         echo "Building $IMAGE_ID:$VERSION"
         docker build -t $IMAGE_ID:$VERSION .
         docker push $IMAGE_ID:$VERSION
-
-    - name: Upload MLflow Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: mlflow-runs
-        path: mlruns/
-
-    - name: Upload EDA Reports
-      uses: actions/upload-artifact@v4
-      with:
-        name: eda-reports
-        path: plots/
