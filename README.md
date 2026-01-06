@@ -57,3 +57,10 @@
 - MLflow backend store: `mlflow ui --backend-store-uri file:C:\ddrive\AIML-MS\courses\sem3\MLOPs\Assignment\mlflow-runs`
 - Docker registry secret for GitHub Container Registry (ghcr.io) is pre-configured with specific credentials.
 - The project includes automated EDA, model training, prediction, and testing scripts in the src and tests directories.
+
+#### Architecture Diagram
+
+![MLOps Architecture Diagram](https://github.com/sriramgunda/MLOPS/blob/sriram/MLOps-architecture.png?raw=true)
+
+#### Recording Link
+https://www.youtube.com/watch?v=SqjqfYa2Kyc
