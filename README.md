@@ -60,7 +60,7 @@
 
 #### Architecture Diagram
 
-![MLOps Architecture Diagram](https://github.com/sriramgunda/MLOPS/blob/sriram/MLOps-architecture.png?raw=true)
+![MLOps Architecture Diagram](https://github.com/sriramgunda/MLOPS/blob/sriram/documentation/MLOps-architecture.png?raw=true)
 
 #### Recording Link
 https://www.youtube.com/watch?v=SqjqfYa2Kyc
